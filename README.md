@@ -6,7 +6,7 @@ A 3D forklift drifting game that runs entirely in a web browser. Drift around a 
 
 Open `index.html` in any modern browser (Chrome, Edge, Firefox). No server required — just double-click the file.
 
-> **Note:** `three.min.js` must be in the same folder as `index.html`.
+> `index.html` is completely self-contained (Three.js is bundled inside it). No other files are needed.
 
 ### Controls
 
@@ -66,7 +66,7 @@ Loading screen:
 
 ## Technical Stack
 
-- **Rendering:** [Three.js r128](https://threejs.org/) (bundled — no CDN required)
+- **Rendering:** [Three.js r137](https://threejs.org/) (bundled inline — no CDN, no external files)
 - **Physics:** Custom arcade drift model with velocity blending
 - **All geometry:** Procedural — no external 3D model files
-- **Single file:** Everything is in `index.html` + `three.min.js`
+- **Single file:** Everything is self-contained in `index.html`
