@@ -1,0 +1,24 @@
+{
+  "name": "forkliftdriftinggame",
+  "version": "1.0.0",
+  "description": "This is a game where you can drift a forklift",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Brett-D/forkliftdriftinggame.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Brett-D/forkliftdriftinggame/issues"
+  },
+  "homepage": "https://github.com/Brett-D/forkliftdriftinggame#readme",
+  "dependencies": {
+    "three": "^0.128.0"
+  }
+}

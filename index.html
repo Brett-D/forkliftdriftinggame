@@ -1,0 +1,989 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Forklift Drift – Fast & Furious Warehouse</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{background:#000;overflow:hidden;font-family:'Arial Black',Arial,sans-serif;color:#fff}
+    canvas{position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:1}
+
+    /* ── Loading ── */
+    #loading{position:fixed;inset:0;background:#000;display:flex;flex-direction:column;
+      align-items:center;justify-content:center;z-index:200}
+    #loading h1{font-size:3.2rem;color:#FFD700;text-shadow:0 0 30px #FFD700;margin-bottom:.5rem}
+    #loading p{color:#888;letter-spacing:3px;margin-bottom:1.5rem;font-size:.9rem}
+    #lbar-wrap{width:320px;height:8px;background:#222;border-radius:4px;overflow:hidden}
+    #lbar{height:100%;width:0%;background:linear-gradient(90deg,#FFD700,#FF8C00);transition:width .2s}
+
+    /* ── Start screen ── */
+    #start{position:fixed;inset:0;background:rgba(0,0,0,.88);display:none;flex-direction:column;
+      align-items:center;justify-content:center;z-index:150}
+    #start h1{font-size:3.5rem;color:#FFD700;text-shadow:0 0 40px #FFD700;letter-spacing:4px;margin-bottom:.3rem}
+    #start .sub{color:#FF8C00;font-size:1.1rem;letter-spacing:3px;margin-bottom:2rem}
+    .ctrl-list{list-style:none;font-size:.9rem;color:#ccc;line-height:2.1;margin-bottom:2rem;text-align:left}
+    .ctrl-list kbd{display:inline-block;background:#333;padding:2px 10px;border-radius:4px;
+      color:#FFD700;font-weight:700;font-family:inherit;margin-right:8px}
+    #btn-start{padding:14px 52px;font-size:1.25rem;background:linear-gradient(135deg,#FFD700,#FF8C00);
+      color:#000;border:none;border-radius:8px;cursor:pointer;font-weight:900;letter-spacing:2px;
+      font-family:inherit;pointer-events:auto}
+    #btn-start:hover{filter:brightness(1.15)}
+
+    /* ── HUD ── */
+    #hud{position:fixed;inset:0;pointer-events:none;z-index:10;display:none}
+    #score-box{position:absolute;top:18px;left:20px}
+    #score-lbl{font-size:.7rem;color:#aaa;letter-spacing:3px}
+    #score-val{font-size:2.6rem;color:#FFD700;text-shadow:0 0 12px rgba(255,215,0,.6)}
+    #speed-box{position:absolute;bottom:36px;right:28px;text-align:right}
+    #speed-num{font-size:3.2rem;color:#fff;text-shadow:1px 1px 4px rgba(0,0,0,.8)}
+    #speed-unit{font-size:.7rem;color:#999;letter-spacing:3px}
+    #drift-msg{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+      font-size:4rem;color:#FF4400;text-shadow:0 0 25px #FF4400,0 0 50px rgba(255,68,0,.4);
+      letter-spacing:5px;opacity:0;transition:opacity .08s;font-weight:900;white-space:nowrap}
+    #drift-msg.on{opacity:1;animation:dpulse .28s infinite alternate}
+    @keyframes dpulse{to{transform:translate(-50%,-50%) scale(1.06)}}
+    #combo-box{position:absolute;top:calc(50% - 80px);left:50%;transform:translateX(-50%);
+      text-align:center;opacity:0;transition:opacity .3s}
+    #combo-box.on{opacity:1}
+    #combo-pts{font-size:1.9rem;color:#FFD700;text-shadow:0 0 10px #FFD700}
+    #cam-box{position:absolute;top:18px;right:20px;text-align:right}
+    #cam-name{font-size:.95rem;color:#ddd;letter-spacing:2px}
+    #cam-hint{font-size:.65rem;color:#666;letter-spacing:2px;margin-top:2px}
+    #controls-hint{position:absolute;bottom:16px;left:20px;font-size:.65rem;color:#555;line-height:1.8}
+    .popup{position:absolute;font-size:1.4rem;font-weight:700;color:#FFD700;
+      text-shadow:0 0 8px #FFD700;pointer-events:none;animation:pfloat 1.1s ease-out forwards}
+    @keyframes pfloat{0%{opacity:1;transform:translateY(0)}100%{opacity:0;transform:translateY(-90px)}}
+
+    /* ── Cockpit overlay (FPV pillars) ── */
+    #cockpit{position:fixed;inset:0;pointer-events:none;z-index:9;display:none}
+    #cockpit svg{width:100%;height:100%}
+  </style>
+</head>
+<body>
+
+<!-- Loading -->
+<div id="loading">
+  <h1>🚜 FORKLIFT DRIFT</h1>
+  <p>FAST &amp; FURIOUS WAREHOUSE EDITION</p>
+  <div id="lbar-wrap"><div id="lbar"></div></div>
+</div>
+
+<!-- Start -->
+<div id="start">
+  <h1>🚜 FORKLIFT DRIFT</h1>
+  <div class="sub">FAST &amp; FURIOUS WAREHOUSE EDITION</div>
+  <ul class="ctrl-list">
+    <li><kbd>W / ↑</kbd> Accelerate</li>
+    <li><kbd>S / ↓</kbd> Brake / Reverse</li>
+    <li><kbd>A / ←</kbd> Steer Left</li>
+    <li><kbd>D / →</kbd> Steer Right</li>
+    <li><kbd>SPACE</kbd> Handbrake — DRIFT!</li>
+    <li><kbd>C</kbd> Switch Camera View</li>
+  </ul>
+  <button id="btn-start">START DRIFTING!</button>
+</div>
+
+<!-- HUD -->
+<div id="hud">
+  <div id="score-box">
+    <div id="score-lbl">SCORE</div>
+    <div id="score-val">0</div>
+  </div>
+  <div id="drift-msg">D R I F T !</div>
+  <div id="combo-box"><div id="combo-pts">+0</div></div>
+  <div id="cam-box">
+    <div id="cam-name">THIRD PERSON</div>
+    <div id="cam-hint">PRESS C TO SWITCH</div>
+  </div>
+  <div id="speed-box">
+    <div id="speed-num">0</div>
+    <div id="speed-unit">KM/H</div>
+  </div>
+  <div id="controls-hint">W/S = GAS/BRAKE &nbsp;|&nbsp; A/D = STEER &nbsp;|&nbsp; SPACE = HANDBRAKE &nbsp;|&nbsp; C = CAMERA</div>
+</div>
+
+<!-- Cockpit overlay shown in FPV mode -->
+<div id="cockpit">
+  <svg viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
+    <!-- Left pillar -->
+    <polygon points="0,0 160,0 220,1080 0,1080" fill="rgba(200,160,0,0.55)"/>
+    <!-- Right pillar -->
+    <polygon points="1920,0 1760,0 1700,1080 1920,1080" fill="rgba(200,160,0,0.55)"/>
+    <!-- Top guard bar -->
+    <rect x="0" y="0" width="1920" height="28" fill="rgba(180,140,0,0.45)"/>
+    <!-- Dashboard strip at bottom -->
+    <rect x="0" y="940" width="1920" height="140" fill="rgba(20,20,20,0.7)"/>
+    <!-- Gauge circles -->
+    <circle cx="760" cy="1010" r="45" fill="none" stroke="#444" stroke-width="8"/>
+    <circle cx="960" cy="1010" r="45" fill="none" stroke="#444" stroke-width="8"/>
+    <circle cx="1160" cy="1010" r="45" fill="none" stroke="#444" stroke-width="8"/>
+    <!-- Steering wheel outline -->
+    <circle cx="730" cy="1020" r="55" fill="none" stroke="#222" stroke-width="14"/>
+    <line x1="730" y1="965" x2="730" y2="1075" stroke="#222" stroke-width="8"/>
+    <line x1="675" y1="1020" x2="785" y2="1020" stroke="#222" stroke-width="8"/>
+  </svg>
+</div>
+
+<script src="three.min.js"></script>
+<script>
+(function () {
+'use strict';
+
+// ═══════════════════════════════════════════════
+//  CONSTANTS
+// ═══════════════════════════════════════════════
+const W_W = 80;   // warehouse width
+const W_D = 120;  // warehouse depth
+const W_H = 12;   // warehouse height
+
+// ═══════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════
+let renderer, scene, camera;
+let forkliftGroup, wheelGroups = [], mastGroup, carriageGroup;
+let pallets = [], racks = [];
+let smokeParticles = [], smokeGeo, smokePts;
+let score = 0;
+let isRunning = false;
+let cameraMode = 0; // 0 = third-person, 1 = FPV
+let prevTime = performance.now();
+
+// Physics
+const ph = { px:5, pz:5, yaw:0, vx:0, vz:0 };
+
+// Drift tracking
+let driftActive = false, driftTimer = 0, driftCombo = 0, driftMult = 1;
+let driftEndTO = null;
+
+// Input
+const keys = {};
+
+// DOM refs
+const loadingEl  = document.getElementById('loading');
+const lbarEl     = document.getElementById('lbar');
+const startEl    = document.getElementById('start');
+const hudEl      = document.getElementById('hud');
+const cockpitEl  = document.getElementById('cockpit');
+const scoreEl    = document.getElementById('score-val');
+const speedEl    = document.getElementById('speed-num');
+const driftMsgEl = document.getElementById('drift-msg');
+const comboBox   = document.getElementById('combo-box');
+const comboPts   = document.getElementById('combo-pts');
+const camNameEl  = document.getElementById('cam-name');
+const CAM_NAMES  = ['THIRD PERSON', 'COCKPIT VIEW'];
+
+// ═══════════════════════════════════════════════
+//  MATERIAL HELPERS
+// ═══════════════════════════════════════════════
+function mat(col, opts) {
+  return new THREE.MeshStandardMaterial(Object.assign({ color: col }, opts || {}));
+}
+const M = {
+  yellow   : mat(0xFFCC00, { roughness:.35, metalness:.2 }),
+  yDark    : mat(0xCC9900, { roughness:.45, metalness:.15 }),
+  yDarker  : mat(0x996600, { roughness:.5,  metalness:.1 }),
+  black    : mat(0x111111, { roughness:.85 }),
+  chrome   : mat(0xCCCCCC, { roughness:.08, metalness:.95 }),
+  rubber   : mat(0x1a1a1a, { roughness:.95 }),
+  glass    : mat(0x99DDFF, { roughness:0,   metalness:.05, transparent:true, opacity:.32 }),
+  rackBlue : mat(0x2255AA, { roughness:.55, metalness:.45 }),
+  rackOr   : mat(0xFF8800, { roughness:.5,  metalness:.4  }),
+  wood     : mat(0xAA8850, { roughness:.9  }),
+  woodDark : mat(0x886635, { roughness:.9  }),
+  concrete : mat(0x888899, { roughness:.9  }),
+  wallMetal: mat(0x8899BB, { roughness:.8,  metalness:.1  }),
+  red      : mat(0xCC2200, { roughness:.4  }),
+  white    : mat(0xFFFFFF, { emissive:0xFFFFFF, emissiveIntensity:2.5, roughness:.1 }),
+  tailRed  : mat(0xFF2200, { emissive:0xFF2200, emissiveIntensity:1.2, roughness:.3 }),
+  steelGrey: mat(0x9AABBB, { roughness:.4, metalness:.6 }),
+};
+
+function cloneMat(m) { return m.clone(); }
+
+// ═══════════════════════════════════════════════
+//  RENDERER
+// ═══════════════════════════════════════════════
+function setupRenderer() {
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.1;
+  document.body.appendChild(renderer.domElement);
+  window.addEventListener('resize', () => {
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    if (camera) { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); }
+  });
+}
+
+// ═══════════════════════════════════════════════
+//  SCENE & LIGHTS
+// ═══════════════════════════════════════════════
+function setupScene() {
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x111122);
+  scene.fog = new THREE.FogExp2(0x111122, 0.012);
+}
+
+function setupLights() {
+  scene.add(new THREE.AmbientLight(0xFFEEDD, 0.35));
+
+  const sun = new THREE.DirectionalLight(0xFFEEDD, 0.9);
+  sun.position.set(15, 30, 10);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.camera.near = 0.5;
+  sun.shadow.camera.far = 220;
+  sun.shadow.camera.left = sun.shadow.camera.bottom = -70;
+  sun.shadow.camera.right = sun.shadow.camera.top = 70;
+  scene.add(sun);
+
+  // Warehouse fluorescent banks
+  const fluPositions = [
+    [-24,-40],[0,-40],[24,-40],
+    [-24,  0],[0,  0],[24,  0],
+    [-24, 40],[0, 40],[24, 40],
+  ];
+  fluPositions.forEach(([x,z]) => {
+    const pl = new THREE.PointLight(0xFFF5E4, 1.6, 28);
+    pl.position.set(x, W_H - 0.6, z);
+    scene.add(pl);
+    // visual fixture
+    const fix = new THREE.Mesh(
+      new THREE.BoxGeometry(1.8, .08, .36),
+      mat(0xFFFFFF,{emissive:0xFFF5E4,emissiveIntensity:2.5})
+    );
+    fix.position.set(x, W_H - .05, z);
+    scene.add(fix);
+  });
+}
+
+// ═══════════════════════════════════════════════
+//  FORKLIFT MODEL  (forks face +Z = forward)
+// ═══════════════════════════════════════════════
+function createForklift() {
+  forkliftGroup = new THREE.Group();
+  scene.add(forkliftGroup);
+  forkliftGroup.position.set(ph.px, 0, ph.pz);
+
+  const add = (geo, m, pos, rot) => {
+    const mesh = new THREE.Mesh(geo, m);
+    if (pos) mesh.position.set(...pos);
+    if (rot) { mesh.rotation.x=rot[0]||0; mesh.rotation.y=rot[1]||0; mesh.rotation.z=rot[2]||0; }
+    mesh.castShadow = true;
+    forkliftGroup.add(mesh);
+    return mesh;
+  };
+
+  // ── Chassis ──
+  add(new THREE.BoxGeometry(1.38, .52, 2.5), M.yellow, [0,.38, -.05]);
+  add(new THREE.BoxGeometry(1.32, .08, 2.42), M.yDark, [0,.12,-.05]); // underplate
+
+  // ── Counterweight (rear -Z) ──
+  add(new THREE.BoxGeometry(1.28, .88, .72), M.yDarker, [0,.55,-1.22]);
+  // curved bottom of CW
+  const cwCurve = new THREE.Mesh(
+    new THREE.CylinderGeometry(.38,.38,1.28,20,1,false,0,Math.PI),
+    M.yDarker
+  );
+  cwCurve.rotation.set(Math.PI/2,0,Math.PI/2); cwCurve.position.set(0,.17,-1.58);
+  forkliftGroup.add(cwCurve);
+
+  // ── Engine hood / mid section ──
+  add(new THREE.BoxGeometry(1.3, .2, 1.1), M.yellow, [0,.9,.12]);
+  // hood vents
+  for(let i=-2;i<=2;i++) add(new THREE.BoxGeometry(.04,.22,.72),M.black,[i*.22,.9,.15]);
+
+  // ── Operator cab / compartment ──
+  add(new THREE.BoxGeometry(1.15,.72,.95), M.yellow, [0,1.3,-.08]);
+  // cab floor panel
+  add(new THREE.BoxGeometry(1.0,.04,.88), M.yDark, [0,.96,-.08]);
+
+  // Cab windows (glass panels)
+  add(new THREE.BoxGeometry(1.0, .48, .04), M.glass, [0,1.38,-.55]);  // front glass
+  add(new THREE.BoxGeometry(.04,.48,.82), M.glass, [-.575,1.38,-.08]); // left glass
+  add(new THREE.BoxGeometry(.04,.48,.82), M.glass, [.575, 1.38,-.08]); // right glass
+
+  // ── Overhead guard ──
+  const postGeo = new THREE.CylinderGeometry(.038,.038,1.22,8);
+  [[-0.52,-.4],[0.52,-.4],[-0.52,.48],[0.52,.48]].forEach(([px,pz]) => {
+    const p = new THREE.Mesh(postGeo, M.yellow); p.castShadow=true;
+    p.position.set(px,1.72+.61,pz); forkliftGroup.add(p);
+  });
+  // top frame bars
+  add(new THREE.BoxGeometry(1.04,.055,.06), M.yellow, [0,2.39,-.4]);
+  add(new THREE.BoxGeometry(1.04,.055,.06), M.yellow, [0,2.39, .48]);
+  add(new THREE.BoxGeometry(.06,.055,.88), M.yellow, [-.52,2.39,.04]);
+  add(new THREE.BoxGeometry(.06,.055,.88), M.yellow, [ .52,2.39,.04]);
+
+  // ── Seat ──
+  add(new THREE.BoxGeometry(.65,.1,.5),  M.black, [0,1.08,-.08]);
+  add(new THREE.BoxGeometry(.65,.45,.08),M.black, [0,1.3,.38]);
+
+  // ── Steering wheel ──
+  const swRim = new THREE.Mesh(new THREE.TorusGeometry(.19,.025,8,24), M.black);
+  swRim.rotation.set(1.1,0,0); swRim.position.set(-.28,1.6,-.3); forkliftGroup.add(swRim);
+  const swPost = new THREE.Mesh(new THREE.CylinderGeometry(.018,.018,.28,8), M.chrome);
+  swPost.rotation.set(1.1,0,0); swPost.position.set(-.28,1.47,-.2); forkliftGroup.add(swPost);
+
+  // ── Dashboard ──
+  add(new THREE.BoxGeometry(1.05,.28,.1), M.black, [0,1.44,-.5]);
+  [-.28,0,.28].forEach(x => {
+    const g=new THREE.Mesh(new THREE.CylinderGeometry(.055,.055,.018,12),mat(0x1a1a33));
+    g.rotation.x=Math.PI/2; g.position.set(x,1.53,-.555); forkliftGroup.add(g);
+  });
+
+  // ── Headlights (front, +Z side) ──
+  [-.36,.36].forEach(x => {
+    const hl = new THREE.Mesh(new THREE.CylinderGeometry(.11,.11,.055,16), M.white);
+    hl.rotation.x=Math.PI/2; hl.position.set(x,.72,1.35); forkliftGroup.add(hl);
+    const sl = new THREE.SpotLight(0xFFFFEE,2.5,18,Math.PI/7,.35);
+    sl.position.set(x,.72,1.35);
+    sl.target.position.set(x,.4,8);
+    forkliftGroup.add(sl); forkliftGroup.add(sl.target);
+  });
+
+  // ── Tail lights (-Z side) ──
+  [-.44,.44].forEach(x => {
+    const t=new THREE.Mesh(new THREE.BoxGeometry(.22,.1,.04),M.tailRed);
+    t.position.set(x,.72,-1.56); forkliftGroup.add(t);
+  });
+
+  // ── Exhaust pipe ──
+  add(new THREE.CylinderGeometry(.038,.048,.55,12), M.chrome, [-.48,1.25,-.8]);
+  add(new THREE.CylinderGeometry(.058,.058,.06,12), M.black,  [-.48,1.57,-.8]);
+
+  // ── Hydraulic cylinder ──
+  add(new THREE.CylinderGeometry(.046,.056,.95,12), M.steelGrey, [0,.88,.65],[Math.PI/7,0,0]);
+
+  // ══ MAST ASSEMBLY (at front, +Z) ══
+  mastGroup = new THREE.Group();
+  mastGroup.position.set(0,0,1.18);
+  forkliftGroup.add(mastGroup);
+
+  // Outer mast channels
+  [-.43,.43].forEach(x => {
+    const m=new THREE.Mesh(new THREE.BoxGeometry(.1,2.9,.11),M.yellow);
+    m.position.set(x,1.52,0); m.castShadow=true; mastGroup.add(m);
+  });
+  // Inner mast (sliding rail look)
+  [-.31,.31].forEach(x => {
+    const m=new THREE.Mesh(new THREE.BoxGeometry(.076,2.15,.09),M.chrome);
+    m.position.set(x,1.44,0); mastGroup.add(m);
+  });
+  // Mast cross ties
+  [.45,1.52,2.62].forEach(y => {
+    const m=new THREE.Mesh(new THREE.BoxGeometry(.88,.1,.1),M.yellow);
+    m.position.set(0,y,0); mastGroup.add(m);
+  });
+  // Mast tilt link
+  const mastLink=new THREE.Mesh(new THREE.BoxGeometry(.06,.06,.72),M.chrome);
+  mastLink.position.set(0,.48,-.38); mastGroup.add(mastLink);
+
+  // ══ FORK CARRIAGE ══
+  carriageGroup = new THREE.Group();
+  carriageGroup.position.set(0,.42,.1);
+  mastGroup.add(carriageGroup);
+
+  // Carriage back plate
+  carriageGroup.add(Object.assign(
+    new THREE.Mesh(new THREE.BoxGeometry(.88,.48,.08),M.yellow),
+    {position:{x:0,y:.25,z:0},castShadow:true}
+  ));
+  // Forks
+  [-.29,.29].forEach(x => {
+    const fork=new THREE.Mesh(new THREE.BoxGeometry(.12,.07,1.38),M.chrome);
+    fork.position.set(x,0,.7); fork.castShadow=true; carriageGroup.add(fork);
+    const tip=new THREE.Mesh(new THREE.BoxGeometry(.12,.035,.12),M.chrome);
+    tip.position.set(x,-.017,1.44); carriageGroup.add(tip);
+  });
+
+  // ══ WHEELS ══
+  wheelGroups = [];
+  const WR = .34, WW = .28;
+  const wheelPositions = [
+    { x:-0.74, z: 0.78, tag:'rl' },
+    { x: 0.74, z: 0.78, tag:'rr' },
+    { x:-0.74, z:-0.82, tag:'fl' },
+    { x: 0.74, z:-0.82, tag:'fr' },
+  ];
+  wheelPositions.forEach(({x,z,tag}) => {
+    // positionGroup (moves with forklift, controls steering angle for front)
+    const wPos = new THREE.Group();
+    wPos.position.set(x, WR-.04, z);
+    forkliftGroup.add(wPos);
+
+    // spinGroup (animates the rolling rotation)
+    const wSpin = new THREE.Group();
+    wPos.add(wSpin);
+
+    // Tire (cylinder axis=Y, rotated 90° around Z so axis becomes X = the axle)
+    const tire = new THREE.Mesh(new THREE.CylinderGeometry(WR,WR,WW,28), M.rubber);
+    tire.rotation.z = Math.PI/2;
+    wSpin.add(tire);
+
+    // Hub
+    const hub = new THREE.Mesh(new THREE.CylinderGeometry(.13,.13,WW+.02,16), M.chrome);
+    hub.rotation.z = Math.PI/2;
+    wSpin.add(hub);
+
+    // Lug bolts (5)
+    for(let i=0;i<5;i++){
+      const ang = (i/5)*Math.PI*2;
+      const lug=new THREE.Mesh(new THREE.CylinderGeometry(.022,.022,WW+.04,6),M.chrome);
+      lug.rotation.z=Math.PI/2;
+      lug.position.set(0, Math.sin(ang)*.09, Math.cos(ang)*.09);
+      wSpin.add(lug);
+    }
+
+    // Wheel arch guards
+    const archMat = cloneMat(M.yellow);
+    const arch = new THREE.Mesh(new THREE.CylinderGeometry(WR+.04,WR+.04,WW+.1,18,1,true,-Math.PI*.22,Math.PI*1.0), archMat);
+    arch.rotation.set(0,0,Math.PI/2);
+    wPos.add(arch);
+
+    wPos.castShadow = true;
+    wheelGroups.push({ pos:wPos, spin:wSpin, tag });
+  });
+}
+
+// ═══════════════════════════════════════════════
+//  FLOOR TEXTURE
+// ═══════════════════════════════════════════════
+function makeFloorTex() {
+  const c=document.createElement('canvas'); c.width=1024; c.height=1024;
+  const ctx=c.getContext('2d');
+  ctx.fillStyle='#888899'; ctx.fillRect(0,0,1024,1024);
+  // concrete noise
+  for(let i=0;i<4000;i++){
+    const x=Math.random()*1024,y=Math.random()*1024,r=Math.random()*3+.5;
+    const v=Math.floor(Math.random()*25)-12;
+    ctx.fillStyle=`rgba(${128+v},${128+v},${135+v},0.28)`;
+    ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
+  }
+  // Yellow safety aisle lines
+  ctx.strokeStyle='#FFD700'; ctx.lineWidth=14; ctx.setLineDash([70,35]);
+  [128,384,640,896].forEach(x=>{ ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,1024);ctx.stroke(); });
+  // Forklift zone cross lines
+  ctx.strokeStyle='#FF5500'; ctx.lineWidth=9; ctx.setLineDash([50,50]);
+  [256,768].forEach(y=>{ ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(1024,y);ctx.stroke(); });
+  ctx.setLineDash([]);
+  // Hazard stripes near dock
+  ctx.strokeStyle='#FFD700'; ctx.lineWidth=18;
+  for(let i=-4;i<16;i++){
+    ctx.beginPath();ctx.moveTo(i*80,0);ctx.lineTo(i*80+60,1024);ctx.stroke();
+  }
+  const t=new THREE.CanvasTexture(c);
+  t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(5,7);
+  return t;
+}
+
+// ═══════════════════════════════════════════════
+//  WAREHOUSE
+// ═══════════════════════════════════════════════
+function createWarehouse() {
+  // Floor
+  const floor=new THREE.Mesh(
+    new THREE.PlaneGeometry(W_W,W_D),
+    new THREE.MeshStandardMaterial({map:makeFloorTex(),roughness:.82,metalness:.04})
+  );
+  floor.rotation.x=-Math.PI/2; floor.receiveShadow=true; scene.add(floor);
+
+  // Walls – corrugated texture
+  const wallCanvas=document.createElement('canvas'); wallCanvas.width=512; wallCanvas.height=256;
+  const wc=wallCanvas.getContext('2d');
+  wc.fillStyle='#8899BB'; wc.fillRect(0,0,512,256);
+  wc.strokeStyle='#7788AA'; wc.lineWidth=5;
+  for(let x=0;x<512;x+=18){ wc.beginPath();wc.moveTo(x,0);wc.lineTo(x,256);wc.stroke(); }
+  wc.strokeStyle='#99AABB'; wc.lineWidth=4;
+  [35,100,165,220].forEach(y=>{ wc.beginPath();wc.moveTo(0,y);wc.lineTo(512,y);wc.stroke(); });
+  const wallTex=new THREE.CanvasTexture(wallCanvas);
+  wallTex.wrapS=wallTex.wrapT=THREE.RepeatWrapping; wallTex.repeat.set(8,1);
+  const wallMat=new THREE.MeshStandardMaterial({map:wallTex,roughness:.8,metalness:.12});
+
+  function makeWall(w,h,px,py,pz,ry){
+    const m=new THREE.Mesh(new THREE.PlaneGeometry(w,h),wallMat.clone());
+    m.position.set(px,py,pz); if(ry) m.rotation.y=ry; m.receiveShadow=true; scene.add(m);
+  }
+  const hw=W_H/2;
+  makeWall(W_W,W_H, 0,hw,-W_D/2, 0);
+  makeWall(W_W,W_H, 0,hw, W_D/2, Math.PI);
+  makeWall(W_D,W_H,-W_W/2,hw,0, Math.PI/2);
+  makeWall(W_D,W_H, W_W/2,hw,0,-Math.PI/2);
+
+  // Ceiling
+  const ceil=new THREE.Mesh(
+    new THREE.PlaneGeometry(W_W,W_D),
+    new THREE.MeshStandardMaterial({color:0x44445A,roughness:1})
+  );
+  ceil.rotation.x=Math.PI/2; ceil.position.y=W_H; scene.add(ceil);
+
+  // Structural columns
+  const colGeo=new THREE.BoxGeometry(.5,W_H,.5);
+  const colMat=new THREE.MeshStandardMaterial({color:0x5566AA,roughness:.7,metalness:.35});
+  [[-35,-50],[-35,0],[-35,50],[35,-50],[35,0],[35,50],
+   [-12,-58],[12,-58],[-12,58],[12,58]].forEach(([cx,cz])=>{
+    const col=new THREE.Mesh(colGeo,colMat); col.castShadow=true;
+    col.position.set(cx,W_H/2,cz); scene.add(col);
+  });
+
+  // Roof trusses
+  const trussGeo=new THREE.BoxGeometry(W_W,.28,.28);
+  const trussMat=new THREE.MeshStandardMaterial({color:0x556688,roughness:.6,metalness:.4});
+  for(let z=-55;z<=55;z+=18){
+    const t=new THREE.Mesh(trussGeo,trussMat); t.position.set(0,W_H-.2,z); scene.add(t);
+  }
+
+  // Loading dock
+  const dockMesh=new THREE.Mesh(
+    new THREE.BoxGeometry(22,1.1,7),
+    new THREE.MeshStandardMaterial({color:0x666677,roughness:.9})
+  );
+  dockMesh.position.set(0,.55,W_D/2-3.5); dockMesh.castShadow=true; dockMesh.receiveShadow=true;
+  scene.add(dockMesh);
+  // Dock doors
+  [-7,0,7].forEach(x=>{
+    const doorM=new THREE.Mesh(new THREE.BoxGeometry(4,4.5,.15),
+      new THREE.MeshStandardMaterial({color:0x3366AA,roughness:.4,metalness:.65}));
+    doorM.position.set(x,3.35,W_D/2); scene.add(doorM);
+    for(let i=0;i<6;i++){
+      const band=new THREE.Mesh(new THREE.BoxGeometry(4,.06,.2),
+        new THREE.MeshStandardMaterial({color:0x224488,roughness:.4,metalness:.6}));
+      band.position.set(x,.9+i*.65,W_D/2); scene.add(band);
+    }
+  });
+  // Safety bollards near dock
+  [-9,-4.5,0,4.5,9].forEach(x=>{
+    const b=new THREE.Mesh(new THREE.CylinderGeometry(.12,.12,.9,12),
+      new THREE.MeshStandardMaterial({color:0xFFCC00,roughness:.4}));
+    b.position.set(x,.45,W_D/2-8); scene.add(b);
+  });
+
+  // ── Racking system ──
+  const rackCols = [
+    {x:-27, zs:-52, ze:50},
+    {x: 27, zs:-52, ze:50},
+    {x:-12, zs:-52, ze:-8},
+    {x: 12, zs:-52, ze:-8},
+    {x:-12, zs:  8, ze:50},
+    {x: 12, zs:  8, ze:50},
+  ];
+  rackCols.forEach(({x,zs,ze})=>{
+    for(let z=zs;z<=ze;z+=11) createRackUnit(x,z);
+  });
+
+  // ── Pallets on the floor ──
+  [
+    [0,-2],[6,-22],[-6,-22],[0,-34],[14,4],[-14,4],
+    [0,22],[13,-48],[-13,-48],[0,-48],[9,32],[-9,32],
+    [4,-12],[-4,-12],[0,44],[17,26],[-17,26],[2,-4],[-2,4],
+    [20,-10],[-20,-10],[20,15],[-20,15],
+  ].forEach(([px,pz])=>{
+    const pg=createPalletGroup();
+    pg.position.set(px,0,pz);
+    pg.rotation.y=Math.random()*Math.PI*2;
+    scene.add(pg);
+    const bb=new THREE.Box3().setFromObject(pg);
+    pallets.push({group:pg, bb, hit:false, origX:px, origZ:pz});
+  });
+
+  // Charging station
+  const csM=new THREE.Mesh(new THREE.BoxGeometry(1.4,2.4,.45),
+    new THREE.MeshStandardMaterial({color:0x334455,roughness:.5,metalness:.3}));
+  csM.position.set(-36,1.2,-48); scene.add(csM);
+  // Emergency signage (red stripes on wall near dock)
+  [-24,-18,-12].forEach(x=>{
+    const sign=new THREE.Mesh(new THREE.BoxGeometry(1.2,.8,.06),
+      new THREE.MeshStandardMaterial({color:0xFF2200,roughness:.5,emissive:0x661100,emissiveIntensity:.4}));
+    sign.position.set(x,2.5,W_D/2-.1); scene.add(sign);
+  });
+}
+
+// ═══════════════════════════════════════════════
+//  RACK UNIT
+// ═══════════════════════════════════════════════
+function createRackUnit(rx, rz) {
+  const g=new THREE.Group(); g.position.set(rx,0,rz);
+  const RW=2.7, RD=.85, RH=5.0, LEVELS=3, LH=RH/LEVELS;
+  const upGeo=new THREE.BoxGeometry(.072,RH,.072);
+  [[-RW/2,-RD/2],[RW/2,-RD/2],[-RW/2,RD/2],[RW/2,RD/2]].forEach(([ux,uz])=>{
+    const up=new THREE.Mesh(upGeo,M.rackBlue);
+    up.position.set(ux,RH/2,uz); up.castShadow=true; g.add(up);
+  });
+  for(let l=0;l<=LEVELS;l++){
+    const y=l*LH;
+    const hBGeo=new THREE.BoxGeometry(RW,.07,.07);
+    [RD/2,-RD/2].forEach(bz=>{
+      const b=new THREE.Mesh(hBGeo,M.rackOr); b.position.set(0,y,bz); g.add(b);
+    });
+    const sBGeo=new THREE.BoxGeometry(.07,.07,RD);
+    [-RW/2,RW/2].forEach(bx=>{
+      const b=new THREE.Mesh(sBGeo,M.rackOr); b.position.set(bx,y,0); g.add(b);
+    });
+    if(l>0){
+      // shelf board
+      const sh=new THREE.Mesh(new THREE.BoxGeometry(RW-.08,.035,RD-.08),
+        mat(0xCCBB99,{roughness:.75}));
+      sh.position.set(0,y+.018,0); sh.receiveShadow=true; g.add(sh);
+      // boxes on shelf
+      if(Math.random()>.15){
+        const n=Math.floor(Math.random()*3)+1;
+        for(let i=0;i<n;i++){
+          const bh=.38+Math.random()*.28, bw=.52+Math.random()*.26, bd=.4+Math.random()*.2;
+          const boxCol=[0x8B4513,0x5566CC,0xCC5511,0xCC9922,0x447744,0x774422][Math.floor(Math.random()*6)];
+          const bx=new THREE.Mesh(new THREE.BoxGeometry(bw,bh,bd),mat(boxCol,{roughness:.8}));
+          bx.position.set((i-n/2+.5)*(bw+.06),y+.02+bh/2,0);
+          bx.castShadow=true; g.add(bx);
+        }
+      }
+    }
+  }
+  scene.add(g);
+  const bb=new THREE.Box3().setFromObject(g);
+  racks.push({group:g,bb});
+}
+
+// ═══════════════════════════════════════════════
+//  PALLET MODEL
+// ═══════════════════════════════════════════════
+function createPalletGroup() {
+  const g=new THREE.Group();
+  // top deck boards
+  for(let i=0;i<5;i++){
+    const b=new THREE.Mesh(new THREE.BoxGeometry(1.18,.05,.17),M.wood);
+    b.position.set(0,.12,(i-2)*.21); b.castShadow=true; g.add(b);
+  }
+  // bottom runners
+  [-1,0,1].forEach(xi=>{
+    const b=new THREE.Mesh(new THREE.BoxGeometry(.13,.09,.13),M.woodDark);
+    b.position.set(xi*.44,.065,0); g.add(b);
+    // entry notches
+    [-1,1].forEach(zi=>{
+      const rb=new THREE.Mesh(new THREE.BoxGeometry(1.18,.05,.11),M.woodDark);
+      rb.position.set(0,.005,zi*.37); g.add(rb);
+    });
+  });
+  // boxes on top (random)
+  if(Math.random()>.25){
+    const layers=Math.floor(Math.random()*3)+1;
+    for(let l=0;l<layers;l++){
+      const bh=.34, bw=.55+Math.random()*.18, bd=.44+Math.random()*.14;
+      const c=[0x8B4513,0x446699,0xCC4422,0xCC9911,0x448844,0x663322][Math.floor(Math.random()*6)];
+      const bx=new THREE.Mesh(new THREE.BoxGeometry(bw,bh,bd),mat(c,{roughness:.75}));
+      bx.position.set((Math.random()-.5)*.25,.15+l*(bh+.02),(Math.random()-.5)*.2);
+      bx.castShadow=true; g.add(bx);
+    }
+  }
+  return g;
+}
+
+// ═══════════════════════════════════════════════
+//  SMOKE PARTICLES
+// ═══════════════════════════════════════════════
+const SMOKE_COUNT=180;
+let smokeArr=[];
+function createSmokeSystem(){
+  smokeArr=[];
+  const pos=new Float32Array(SMOKE_COUNT*3);
+  for(let i=0;i<SMOKE_COUNT;i++){
+    pos[i*3+1]=-200;
+    smokeArr.push({active:false,x:0,y:0,z:0,vx:0,vy:0,vz:0,life:0,max:1,i});
+  }
+  smokeGeo=new THREE.BufferGeometry();
+  smokeGeo.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  smokePts=new THREE.Points(smokeGeo,new THREE.PointsMaterial({
+    color:0xAAAAAA,size:.55,transparent:true,opacity:.45,
+    depthWrite:false,blending:THREE.AdditiveBlending
+  }));
+  scene.add(smokePts);
+}
+function spawnSmoke(x,z){
+  for(let k=0;k<4;k++){
+    const p=smokeArr.find(p=>!p.active); if(!p)return;
+    p.active=true; p.x=x+(Math.random()-.5)*.9; p.y=.12; p.z=z+(Math.random()-.5)*.9;
+    p.vx=(Math.random()-.5)*1.2; p.vy=.6+Math.random()*.8; p.vz=(Math.random()-.5)*1.2;
+    p.life=0; p.max=.6+Math.random()*.5;
+  }
+}
+function updateSmoke(dt){
+  const pos=smokeGeo.attributes.position.array;
+  smokeArr.forEach(p=>{
+    if(!p.active){pos[p.i*3+1]=-200;return;}
+    p.life+=dt;
+    if(p.life>=p.max){p.active=false;pos[p.i*3+1]=-200;return;}
+    p.x+=p.vx*dt; p.y+=p.vy*dt; p.z+=p.vz*dt;
+    p.vy*=(1-.6*dt);
+    pos[p.i*3]=p.x; pos[p.i*3+1]=p.y; pos[p.i*3+2]=p.z;
+  });
+  smokeGeo.attributes.position.needsUpdate=true;
+}
+
+// ═══════════════════════════════════════════════
+//  CAMERA
+// ═══════════════════════════════════════════════
+function setupCamera(){
+  camera=new THREE.PerspectiveCamera(72,window.innerWidth/window.innerHeight,.1,400);
+}
+const camLerpPos=new THREE.Vector3();
+const camLerpTarget=new THREE.Vector3();
+function updateCamera(){
+  const fp=forkliftGroup.position, yaw=ph.yaw;
+  const sx=Math.sin(yaw), sz=Math.cos(yaw);
+  if(cameraMode===0){
+    // Third-person: behind (in -heading direction) + elevated + 45° look-down
+    const BACK=9.5, UP=8.5;
+    const tPos=new THREE.Vector3(fp.x-sx*BACK, UP, fp.z-sz*BACK);
+    camLerpPos.lerp(tPos,.12);
+    camera.position.copy(camLerpPos);
+    // Look at slightly ahead of forklift
+    const tTgt=new THREE.Vector3(fp.x+sx*2.5, 1.2, fp.z+sz*2.5);
+    camLerpTarget.lerp(tTgt,.15);
+    camera.lookAt(camLerpTarget);
+  } else {
+    // FPV: operator eye, looking toward forks (+Z dir)
+    const EYE_BACK=.05, EYE_SIDE=-.14, EYE_H=1.72;
+    const eyeX=fp.x+sx*EYE_BACK+sz*EYE_SIDE;
+    const eyeZ=fp.z+sz*EYE_BACK-sx*EYE_SIDE;
+    camera.position.set(eyeX, EYE_H, eyeZ);
+    const lookX=fp.x+sx*6;
+    const lookZ=fp.z+sz*6;
+    camera.lookAt(lookX, EYE_H*.72, lookZ);
+  }
+}
+
+// ═══════════════════════════════════════════════
+//  PHYSICS
+// ═══════════════════════════════════════════════
+function normAngle(a){
+  while(a> Math.PI)a-=Math.PI*2;
+  while(a<-Math.PI)a+=Math.PI*2;
+  return a;
+}
+function updatePhysics(dt){
+  const fwd  = (keys['w']||keys['arrowup']   )?1:(keys['s']||keys['arrowdown'] )?-1:0;
+  const turn = (keys['d']||keys['arrowright'] )?1:(keys['a']||keys['arrowleft'])?-1:0;
+  const hb   = !!(keys[' ']);
+
+  const sx=Math.sin(ph.yaw), sz=Math.cos(ph.yaw);
+  // Current forward speed (projection of vel onto heading)
+  const fwdSpd = ph.vx*sx + ph.vz*sz;
+
+  // ── Acceleration / braking ──
+  const MAX_SPD=22, ACCEL=20, BRAKE=14, REV_MAX=7;
+  let newFwd=fwdSpd;
+  if(fwd>0) newFwd=Math.min(newFwd+ACCEL*dt, MAX_SPD);
+  else if(fwd<0){
+    if(fwdSpd>.4) newFwd=Math.max(newFwd-BRAKE*dt,0);
+    else           newFwd=Math.max(newFwd-ACCEL*.5*dt,-REV_MAX);
+  }
+  // Drag
+  newFwd*=(1-.75*dt);
+  if(Math.abs(newFwd)<.06)newFwd=0;
+
+  // ── Steering ──
+  const spdF=Math.min(Math.abs(newFwd)/7,1.3);
+  const steerRate=2.3*spdF;
+  if(Math.abs(newFwd)>.3) ph.yaw+=turn*steerRate*Math.sign(newFwd)*dt;
+
+  // ── Grip ──
+  let grip;
+  if(hb&&Math.abs(newFwd)>1){ grip=.07; }                     // handbrake: near-zero grip
+  else {
+    grip=Math.max(.18,.88-Math.abs(newFwd)*.033);              // speed-based grip
+    // Oversteer: forklift rear-steer reduces grip further when turning at speed
+    if(Math.abs(turn)>.01&&Math.abs(newFwd)>6)
+      grip=Math.max(.12, grip*(1-Math.abs(turn)*.38));
+  }
+
+  const nsx=Math.sin(ph.yaw), nsz=Math.cos(ph.yaw);
+  const tvx=nsx*newFwd, tvz=nsz*newFwd;
+  ph.vx=ph.vx*(1-grip)+tvx*grip;
+  ph.vz=ph.vz*(1-grip)+tvz*grip;
+
+  // ── Wall bounds ──
+  const MX=W_W/2-1.8, MZ=W_D/2-1.8;
+  ph.px+=ph.vx*dt; ph.pz+=ph.vz*dt;
+  if(ph.px<-MX){ph.px=-MX;ph.vx*=-.25;}
+  if(ph.px> MX){ph.px= MX;ph.vx*=-.25;}
+  if(ph.pz<-MZ){ph.pz=-MZ;ph.vz*=-.25;}
+  if(ph.pz> MZ){ph.pz= MZ;ph.vz*=-.25;}
+
+  // ── Apply to mesh ──
+  forkliftGroup.position.set(ph.px,0,ph.pz);
+  forkliftGroup.rotation.y=ph.yaw;
+
+  // ── Wheel roll & steer animation ──
+  const spd=Math.sqrt(ph.vx*ph.vx+ph.vz*ph.vz);
+  const rollAmt=spd/(WR_CONST)*dt;
+  const steerAngle=turn*Math.min(spdF,.9)*.42;
+  wheelGroups.forEach(({spin,pos,tag})=>{
+    spin.rotation.y+=rollAmt*(newFwd>=0?1:-1);
+    if(tag==='fl'||tag==='fr') pos.rotation.y=steerAngle;
+  });
+
+  // ── Drift detection ──
+  const velAngle=Math.atan2(ph.vx,ph.vz);
+  const driftAng=Math.abs(normAngle(velAngle-ph.yaw));
+  const isDrifting=driftAng>.14&&spd>3;
+  updateDrift(isDrifting,driftAng,spd,dt);
+
+  // ── Smoke ──
+  if(isDrifting&&spd>3){
+    const rx=ph.px-nsx*.9, rz=ph.pz-nsz*.9;
+    spawnSmoke(rx-nsz*.5,rz+nsx*.5);
+    spawnSmoke(rx+nsz*.5,rz-nsx*.5);
+  }
+
+  // ── Pallet collisions ──
+  checkPallets();
+
+  return {spd, isDrifting};
+}
+const WR_CONST=0.34; // wheel radius constant for roll calc
+
+// ═══════════════════════════════════════════════
+//  DRIFT SYSTEM
+// ═══════════════════════════════════════════════
+function updateDrift(isDrifting,driftAng,spd,dt){
+  if(isDrifting){
+    driftActive=true;
+    driftTimer+=dt;
+    driftCombo+=driftAng*spd*8*dt;
+    driftMult=1+Math.floor(driftTimer*.6)*.5;
+    driftMsgEl.classList.add('on');
+    comboBox.classList.add('on');
+    comboPts.textContent=`+${Math.floor(driftCombo)} ×${driftMult.toFixed(1)}`;
+    if(driftEndTO){clearTimeout(driftEndTO);driftEndTO=null;}
+  } else {
+    if(driftActive){
+      if(driftCombo>8){
+        const earned=Math.floor(driftCombo*driftMult);
+        score+=earned;
+        scoreEl.textContent=score.toLocaleString();
+        spawnPopup(`+${earned}!`);
+      }
+      driftCombo=0; driftTimer=0; driftActive=false;
+      driftMsgEl.classList.remove('on');
+      driftEndTO=setTimeout(()=>{comboBox.classList.remove('on');driftMult=1;},900);
+    }
+  }
+}
+function spawnPopup(txt){
+  const d=document.createElement('div');
+  d.className='popup'; d.textContent=txt;
+  d.style.left=(30+Math.random()*120)+'px';
+  d.style.top =(55+Math.random()*50)+'px';
+  hudEl.appendChild(d);
+  setTimeout(()=>d.remove(),1150);
+}
+
+// ═══════════════════════════════════════════════
+//  COLLISION – PALLETS
+// ═══════════════════════════════════════════════
+function checkPallets(){
+  const fPos=new THREE.Vector3(ph.px,.5,ph.pz);
+  const spd=Math.sqrt(ph.vx*ph.vx+ph.vz*ph.vz);
+  pallets.forEach(p=>{
+    const pPos=p.group.position;
+    const dx=pPos.x-ph.px, dz=pPos.z-ph.pz;
+    const dist=Math.sqrt(dx*dx+dz*dz);
+    if(dist<2.1&&spd>1){
+      const push=spd*.06;
+      const nx=dx/Math.max(dist,.01), nz=dz/Math.max(dist,.01);
+      pPos.x+=nx*push; pPos.z+=nz*push;
+      // Slow forklift slightly on impact
+      ph.vx*=.92; ph.vz*=.92;
+      if(spd>5&&!p.hit){
+        p.hit=true;
+        p.group.rotation.z=(Math.random()-.5)*.55;
+        p.group.rotation.x=(Math.random()-.5)*.32;
+        if(driftActive){
+          score+=150; scoreEl.textContent=score.toLocaleString();
+          spawnPopup('+150 PALLET SMASH!');
+        }
+      }
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════
+//  INPUT
+// ═══════════════════════════════════════════════
+function setupInput(){
+  document.addEventListener('keydown',e=>{
+    keys[e.key.toLowerCase()]=true;
+    if(e.key.toLowerCase()==='c') toggleCam();
+    if(['arrowup','arrowdown','arrowleft','arrowright',' '].includes(e.key.toLowerCase()))
+      e.preventDefault();
+  });
+  document.addEventListener('keyup',e=>{ keys[e.key.toLowerCase()]=false; });
+}
+function toggleCam(){
+  cameraMode^=1;
+  camNameEl.textContent=CAM_NAMES[cameraMode];
+  cockpitEl.style.display=cameraMode===1?'block':'none';
+}
+
+// ═══════════════════════════════════════════════
+//  GAME LOOP
+// ═══════════════════════════════════════════════
+function loop(){
+  if(!isRunning)return;
+  requestAnimationFrame(loop);
+  const now=performance.now();
+  const dt=Math.min((now-prevTime)/1000,.05);
+  prevTime=now;
+
+  const {spd}=updatePhysics(dt);
+  updateSmoke(dt);
+  updateCamera();
+
+  const kmh=Math.round(spd*3.6);
+  speedEl.textContent=kmh;
+
+  renderer.render(scene,camera);
+}
+
+// ═══════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════
+function init(){
+  setupRenderer();
+  setupScene();
+  setupLights();
+  createWarehouse();
+  createForklift();
+  createSmokeSystem();
+  setupCamera();
+  setupInput();
+
+  // Fake loading bar then show start
+  let prog=0;
+  const iv=setInterval(()=>{
+    prog+=Math.random()*18+6;
+    if(prog>=100){prog=100;clearInterval(iv);
+      lbarEl.style.width='100%';
+      setTimeout(()=>{
+        loadingEl.style.display='none';
+        startEl.style.display='flex';
+      },300);
+    } else lbarEl.style.width=prog+'%';
+  },80);
+}
+
+document.getElementById('btn-start').addEventListener('click',()=>{
+  startEl.style.display='none';
+  hudEl.style.display='block';
+  isRunning=true;
+  prevTime=performance.now();
+  loop();
+});
+
+init();
+})();
+</script>
+</body>
+</html>
