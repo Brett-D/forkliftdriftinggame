@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+<title>Keep the Baby from the Can</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    width: 100%;
+    height: 100%;
+    background: #1a0f08;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: #fff;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+  }
+  #game { position: absolute; inset: 0; }
+  #hud {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    padding: 8px 12px;
+    background: rgba(0,0,0,0.45);
+    border-radius: 8px;
+    font-size: 14px;
+    line-height: 1.4;
+    pointer-events: none;
+    max-width: 80vw;
+  }
+  #hud b { color: #ffb070; }
+  #overlay {
+    position: absolute;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    background: rgba(0,0,0,0.7);
+    z-index: 10;
+    text-align: center;
+    padding: 20px;
+  }
+  #overlay.show { display: flex; }
+  #overlay h1 {
+    font-size: clamp(28px, 6vw, 56px);
+    margin: 0 0 24px 0;
+    color: #ff7a4a;
+    text-shadow: 0 2px 12px rgba(255,80,0,0.6);
+  }
+  #restart {
+    font-size: 20px;
+    padding: 12px 28px;
+    background: #ff7a4a;
+    color: #1a0f08;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: bold;
+    box-shadow: 0 4px 16px rgba(255,120,70,0.5);
+  }
+  #restart:hover { background: #ffa070; }
+</style>
+</head>
+<body>
+<div id="game"></div>
+<div id="hud">
+  <b>Keep the Baby from the Can!</b><br/>
+  Click &amp; drag the baby to nudge it away from the can.
+</div>
+<div id="overlay">
+  <h1>The Baby Got the Can!</h1>
+  <button id="restart">Restart</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/cannon@0.6.2/build/cannon.min.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  // ----- Three.js setup -----
+  const container = document.getElementById('game');
+  const overlay = document.getElementById('overlay');
+  const restartBtn = document.getElementById('restart');
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x1a0f08);
+  scene.fog = new THREE.Fog(0x1a0f08, 12, 30);
+
+  const camera = new THREE.PerspectiveCamera(
+    55, window.innerWidth / window.innerHeight, 0.1, 100
+  );
+  camera.position.set(0, 6.5, 9);
+  camera.lookAt(0, 1, 0);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  container.appendChild(renderer.domElement);
+
+  // ----- Lighting -----
+  const ambient = new THREE.AmbientLight(0x402418, 0.45);
+  scene.add(ambient);
+
+  // Fireplace glow (red/orange PointLight)
+  const fireLight = new THREE.PointLight(0xff5520, 2.2, 18, 2);
+  fireLight.position.set(0, 1.2, -3.2);
+  fireLight.castShadow = true;
+  fireLight.shadow.mapSize.width = 512;
+  fireLight.shadow.mapSize.height = 512;
+  scene.add(fireLight);
+
+  // Soft warm fill from above
+  const warmFill = new THREE.DirectionalLight(0xffb080, 0.25);
+  warmFill.position.set(2, 8, 4);
+  scene.add(warmFill);
+
+  // ----- Cannon.js world -----
+  const world = new CANNON.World();
+  world.gravity.set(0, -9.82, 0);
+  world.broadphase = new CANNON.SAPBroadphase(world);
+  world.solver.iterations = 10;
+
+  const groundMat = new CANNON.Material('ground');
+  const bodyMat = new CANNON.Material('body');
+  world.addContactMaterial(new CANNON.ContactMaterial(groundMat, bodyMat, {
+    friction: 0.4, restitution: 0.0
+  }));
+
+  // ----- Living room -----
+  const roomSize = 14;
+
+  // Floor (rug-like)
+  const floorGeo = new THREE.PlaneGeometry(roomSize, roomSize);
+  const floorMat = new THREE.MeshStandardMaterial({
+    color: 0x6b3a22, roughness: 0.95
+  });
+  const floor = new THREE.Mesh(floorGeo, floorMat);
+  floor.rotation.x = -Math.PI / 2;
+  floor.receiveShadow = true;
+  scene.add(floor);
+
+  // Rug accent
+  const rugGeo = new THREE.PlaneGeometry(7, 5);
+  const rugMat = new THREE.MeshStandardMaterial({
+    color: 0x8a3a2a, roughness: 0.9
+  });
+  const rug = new THREE.Mesh(rugGeo, rugMat);
+  rug.rotation.x = -Math.PI / 2;
+  rug.position.y = 0.01;
+  rug.receiveShadow = true;
+  scene.add(rug);
+
+  // Back wall
+  const wallMat = new THREE.MeshStandardMaterial({
+    color: 0x8a6448, roughness: 0.9
+  });
+  const backWall = new THREE.Mesh(
+    new THREE.PlaneGeometry(roomSize, 6), wallMat
+  );
+  backWall.position.set(0, 3, -roomSize / 2);
+  backWall.receiveShadow = true;
+  scene.add(backWall);
+
+  // Side walls
+  const leftWall = new THREE.Mesh(
+    new THREE.PlaneGeometry(roomSize, 6), wallMat
+  );
+  leftWall.rotation.y = Math.PI / 2;
+  leftWall.position.set(-roomSize / 2, 3, 0);
+  scene.add(leftWall);
+
+  const rightWall = new THREE.Mesh(
+    new THREE.PlaneGeometry(roomSize, 6), wallMat
+  );
+  rightWall.rotation.y = -Math.PI / 2;
+  rightWall.position.set(roomSize / 2, 3, 0);
+  scene.add(rightWall);
+
+  // Ground physics
+  const groundBody = new CANNON.Body({ mass: 0, material: groundMat });
+  groundBody.addShape(new CANNON.Plane());
+  groundBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
+  world.add(groundBody);
+
+  // Invisible walls to keep baby in the room
+  function addWall(x, z, nx, nz) {
+    const b = new CANNON.Body({ mass: 0, material: groundMat });
+    b.addShape(new CANNON.Plane());
+    b.position.set(x, 0, z);
+    b.quaternion.setFromVectors(new CANNON.Vec3(0, 0, 1), new CANNON.Vec3(nx, 0, nz));
+    world.add(b);
+  }
+  const wallLimit = roomSize / 2 - 0.5;
+  addWall(0, -wallLimit, 0, 1);
+  addWall(0, wallLimit, 0, -1);
+  addWall(-wallLimit, 0, 1, 0);
+  addWall(wallLimit, 0, -1, 0);
+
+  // ----- Fireplace -----
+  const stoneMat = new THREE.MeshStandardMaterial({
+    color: 0x4a4a4a, roughness: 0.95
+  });
+  const fireplaceGroup = new THREE.Group();
+  fireplaceGroup.position.set(0, 0, -roomSize / 2 + 0.6);
+  scene.add(fireplaceGroup);
+
+  // Hearth base
+  const hearth = new THREE.Mesh(new THREE.BoxGeometry(5, 0.4, 1.4), stoneMat);
+  hearth.position.set(0, 0.2, 0.3);
+  hearth.castShadow = true;
+  hearth.receiveShadow = true;
+  fireplaceGroup.add(hearth);
+
+  // Surround
+  const leftPillar = new THREE.Mesh(new THREE.BoxGeometry(0.8, 3.2, 1.2), stoneMat);
+  leftPillar.position.set(-2.1, 1.6, 0);
+  leftPillar.castShadow = true;
+  fireplaceGroup.add(leftPillar);
+
+  const rightPillar = new THREE.Mesh(new THREE.BoxGeometry(0.8, 3.2, 1.2), stoneMat);
+  rightPillar.position.set(2.1, 1.6, 0);
+  rightPillar.castShadow = true;
+  fireplaceGroup.add(rightPillar);
+
+  const topBar = new THREE.Mesh(new THREE.BoxGeometry(5, 0.6, 1.2), stoneMat);
+  topBar.position.set(0, 3.5, 0);
+  topBar.castShadow = true;
+  fireplaceGroup.add(topBar);
+
+  // Mantle
+  const mantleMat = new THREE.MeshStandardMaterial({
+    color: 0x5a3820, roughness: 0.7
+  });
+  const mantle = new THREE.Mesh(new THREE.BoxGeometry(5.6, 0.25, 1.5), mantleMat);
+  mantle.position.set(0, 3.05, 0.05);
+  mantle.castShadow = true;
+  mantle.receiveShadow = true;
+  fireplaceGroup.add(mantle);
+
+  // Fireplace opening (dark recess)
+  const recess = new THREE.Mesh(
+    new THREE.BoxGeometry(3, 2.2, 0.1),
+    new THREE.MeshBasicMaterial({ color: 0x100604 })
+  );
+  recess.position.set(0, 1.4, 0.61);
+  fireplaceGroup.add(recess);
+
+  // Fire (animated cones)
+  const flames = [];
+  const flameMat = new THREE.MeshBasicMaterial({ color: 0xff6620 });
+  for (let i = 0; i < 5; i++) {
+    const f = new THREE.Mesh(
+      new THREE.ConeGeometry(0.25 + Math.random() * 0.15, 0.7 + Math.random() * 0.4, 8),
+      flameMat.clone()
+    );
+    f.material.color.setHSL(0.05 + Math.random() * 0.05, 1, 0.55);
+    f.position.set(-0.8 + i * 0.4, 0.7, 0.4);
+    fireplaceGroup.add(f);
+    flames.push(f);
+  }
+
+  // ----- The Can on the hearth -----
+  const CAN_RADIUS = 0.18;
+  const CAN_HEIGHT = 0.5;
+  const canGeo = new THREE.CylinderGeometry(CAN_RADIUS, CAN_RADIUS, CAN_HEIGHT, 24);
+  const canMat = new THREE.MeshStandardMaterial({
+    color: 0xcc2222, roughness: 0.3, metalness: 0.7
+  });
+  const canMesh = new THREE.Mesh(canGeo, canMat);
+  // Sit the can on top of the hearth (just in front of the fireplace)
+  // so the baby can actually reach it from the floor.
+  const CAN_POS = new THREE.Vector3(1.8, 0.4 + CAN_HEIGHT / 2, -roomSize / 2 + 1.0);
+  canMesh.position.copy(CAN_POS);
+  canMesh.castShadow = true;
+  scene.add(canMesh);
+
+  // Highlight ring around the can
+  const ringGeo = new THREE.RingGeometry(0.35, 0.45, 24);
+  const ringMat = new THREE.MeshBasicMaterial({
+    color: 0xff4422, side: THREE.DoubleSide, transparent: true, opacity: 0.6
+  });
+  const ring = new THREE.Mesh(ringGeo, ringMat);
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.set(CAN_POS.x, 0.42, CAN_POS.z);
+  scene.add(ring);
+
+  // ----- The Baby (low-poly group of spheres / cylinders) -----
+  const baby = new THREE.Group();
+  const skinMat = new THREE.MeshStandardMaterial({
+    color: 0xffd0a8, roughness: 0.7
+  });
+  const clothMat = new THREE.MeshStandardMaterial({
+    color: 0x66bbee, roughness: 0.8
+  });
+  const hairMat = new THREE.MeshStandardMaterial({
+    color: 0x3a2418, roughness: 0.9
+  });
+
+  // Body (torso)
+  const torso = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.28, 0.34, 0.55, 12), clothMat
+  );
+  torso.position.y = 0.42;
+  torso.castShadow = true;
+  baby.add(torso);
+
+  // Head
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 16, 12), skinMat);
+  head.position.y = 0.95;
+  head.castShadow = true;
+  baby.add(head);
+
+  // Hair cap
+  const hair = new THREE.Mesh(
+    new THREE.SphereGeometry(0.29, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2.4),
+    hairMat
+  );
+  hair.position.y = 0.97;
+  baby.add(hair);
+
+  // Eyes
+  const eyeMat = new THREE.MeshBasicMaterial({ color: 0x111111 });
+  const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 8), eyeMat);
+  const eyeR = eyeL.clone();
+  eyeL.position.set(-0.09, 0.98, 0.25);
+  eyeR.position.set(0.09, 0.98, 0.25);
+  baby.add(eyeL); baby.add(eyeR);
+
+  // Arms (cylinders)
+  const armGeo = new THREE.CylinderGeometry(0.07, 0.07, 0.45, 8);
+  const armL = new THREE.Mesh(armGeo, skinMat);
+  const armR = new THREE.Mesh(armGeo, skinMat);
+  armL.position.set(-0.32, 0.55, 0.05);
+  armR.position.set(0.32, 0.55, 0.05);
+  armL.rotation.z = 0.4;
+  armR.rotation.z = -0.4;
+  armL.castShadow = true; armR.castShadow = true;
+  baby.add(armL); baby.add(armR);
+
+  // Legs
+  const legGeo = new THREE.CylinderGeometry(0.09, 0.09, 0.4, 8);
+  const legL = new THREE.Mesh(legGeo, skinMat);
+  const legR = new THREE.Mesh(legGeo, skinMat);
+  legL.position.set(-0.13, 0.1, 0);
+  legR.position.set(0.13, 0.1, 0);
+  legL.castShadow = true; legR.castShadow = true;
+  baby.add(legL); baby.add(legR);
+
+  scene.add(baby);
+
+  // Baby physics body (capsule-ish via box)
+  const BABY_HALF = new CANNON.Vec3(0.32, 0.6, 0.32);
+  const babyBody = new CANNON.Body({
+    mass: 1.5,
+    material: bodyMat,
+    linearDamping: 0.85,
+    angularDamping: 1.0,
+    fixedRotation: true
+  });
+  babyBody.addShape(new CANNON.Box(BABY_HALF));
+  babyBody.position.set(-3, 0.6, 2);
+  world.add(babyBody);
+
+  // Can physics body (kinematic - it doesn't move, just used for collision check)
+  const CAN_HALF = new CANNON.Vec3(CAN_RADIUS, CAN_HEIGHT / 2, CAN_RADIUS);
+  const canBody = new CANNON.Body({ mass: 0, material: groundMat });
+  canBody.addShape(new CANNON.Box(CAN_HALF));
+  canBody.position.set(CAN_POS.x, CAN_POS.y, CAN_POS.z);
+  world.add(canBody);
+
+  // ----- Wander AI -----
+  const wanderState = {
+    target: new THREE.Vector3(),
+    timer: 0,
+    speed: 1.6,        // base wander speed
+    pursuitSpeed: 2.4, // when heading toward the can
+    pursuitBias: 0.75  // how strongly it pursues the can vs wandering
+  };
+
+  function pickWanderTarget() {
+    // Mix of random wander point + pull toward can
+    const wx = (Math.random() - 0.5) * (roomSize - 2);
+    const wz = (Math.random() - 0.5) * (roomSize - 2);
+    const wander = new THREE.Vector3(wx, 0, wz);
+    const towardCan = new THREE.Vector3(CAN_POS.x, 0, CAN_POS.z);
+    wanderState.target.copy(
+      wander.lerp(towardCan, wanderState.pursuitBias)
+    );
+    wanderState.timer = 1.5 + Math.random() * 1.5;
+  }
+  pickWanderTarget();
+
+  // ----- Player input: drag baby to nudge -----
+  const raycaster = new THREE.Raycaster();
+  const pointer = new THREE.Vector2();
+  const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0); // y=0 plane
+  const dragPoint = new THREE.Vector3();
+  let dragging = false;
+  let dragOffset = new THREE.Vector3();
+
+  function setPointer(ev) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    const x = (ev.touches ? ev.touches[0].clientX : ev.clientX) - rect.left;
+    const y = (ev.touches ? ev.touches[0].clientY : ev.clientY) - rect.top;
+    pointer.x = (x / rect.width) * 2 - 1;
+    pointer.y = -(y / rect.height) * 2 + 1;
+  }
+
+  function intersectGround(out) {
+    raycaster.setFromCamera(pointer, camera);
+    return raycaster.ray.intersectPlane(dragPlane, out);
+  }
+
+  function onDown(ev) {
+    if (gameOver) return;
+    ev.preventDefault();
+    setPointer(ev);
+    raycaster.setFromCamera(pointer, camera);
+    // Did we hit the baby?
+    const hits = raycaster.intersectObject(baby, true);
+    if (hits.length > 0) {
+      dragging = true;
+      if (intersectGround(dragPoint)) {
+        dragOffset.set(
+          baby.position.x - dragPoint.x,
+          0,
+          baby.position.z - dragPoint.z
+        );
+      } else {
+        dragOffset.set(0, 0, 0);
+      }
+    } else {
+      // Tap-to-nudge: push baby away from the tap position
+      if (intersectGround(dragPoint)) {
+        const push = new CANNON.Vec3(
+          babyBody.position.x - dragPoint.x,
+          0,
+          babyBody.position.z - dragPoint.z
+        );
+        const len = Math.hypot(push.x, push.z);
+        if (len > 0.001) {
+          const k = 8 / len;
+          push.x *= k; push.z *= k;
+          babyBody.applyImpulse(push, babyBody.position);
+        }
+      }
+    }
+  }
+
+  function onMove(ev) {
+    if (!dragging || gameOver) return;
+    ev.preventDefault();
+    setPointer(ev);
+    if (intersectGround(dragPoint)) {
+      const targetX = dragPoint.x + dragOffset.x;
+      const targetZ = dragPoint.z + dragOffset.z;
+      // Drive baby with velocity toward drag point (feels like physics-based drag)
+      const dx = targetX - babyBody.position.x;
+      const dz = targetZ - babyBody.position.z;
+      const dragSpeed = 8;
+      babyBody.velocity.x = dx * dragSpeed;
+      babyBody.velocity.z = dz * dragSpeed;
+    }
+  }
+
+  function onUp(ev) {
+    if (dragging) {
+      dragging = false;
+      // Reset wander after release so baby pauses then re-targets
+      wanderState.timer = 0.3 + Math.random() * 0.6;
+    }
+  }
+
+  const dom = renderer.domElement;
+  dom.addEventListener('mousedown', onDown);
+  dom.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+  dom.addEventListener('touchstart', onDown, { passive: false });
+  dom.addEventListener('touchmove', onMove, { passive: false });
+  window.addEventListener('touchend', onUp);
+  window.addEventListener('touchcancel', onUp);
+
+  // ----- Resize -----
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  // ----- Game state / restart -----
+  let gameOver = false;
+
+  function showLose() {
+    gameOver = true;
+    dragging = false;
+    overlay.classList.add('show');
+  }
+
+  function resetGame() {
+    gameOver = false;
+    overlay.classList.remove('show');
+    babyBody.position.set(-3, 0.6, 2);
+    babyBody.velocity.set(0, 0, 0);
+    babyBody.angularVelocity.set(0, 0, 0);
+    pickWanderTarget();
+  }
+
+  restartBtn.addEventListener('click', resetGame);
+
+  // ----- Bounding-box collision check -----
+  const babyBox = new THREE.Box3();
+  const canBox = new THREE.Box3();
+
+  function checkCollision() {
+    babyBox.setFromObject(baby);
+    canBox.setFromObject(canMesh);
+    return babyBox.intersectsBox(canBox);
+  }
+
+  // ----- Main loop -----
+  const clock = new THREE.Clock();
+  const fixedStep = 1 / 60;
+
+  function tick() {
+    const dt = Math.min(clock.getDelta(), 0.05);
+
+    // --- Wander AI ---
+    if (!gameOver && !dragging) {
+      wanderState.timer -= dt;
+      if (wanderState.timer <= 0) pickWanderTarget();
+
+      const dx = wanderState.target.x - babyBody.position.x;
+      const dz = wanderState.target.z - babyBody.position.z;
+      const dist = Math.hypot(dx, dz);
+
+      // If close to wander target, pick a new one
+      if (dist < 0.3) pickWanderTarget();
+
+      // Compute desired direction; bias strongly toward the can
+      const cdx = CAN_POS.x - babyBody.position.x;
+      const cdz = CAN_POS.z - babyBody.position.z;
+      const cdist = Math.hypot(cdx, cdz);
+
+      let dirX = dx / (dist || 1);
+      let dirZ = dz / (dist || 1);
+      // The closer to the can, the more focused the pursuit
+      const focus = Math.min(1, 4 / Math.max(cdist, 0.5));
+      const ndx = cdx / (cdist || 1);
+      const ndz = cdz / (cdist || 1);
+      dirX = dirX * (1 - focus) + ndx * focus;
+      dirZ = dirZ * (1 - focus) + ndz * focus;
+      const dl = Math.hypot(dirX, dirZ) || 1;
+      dirX /= dl; dirZ /= dl;
+
+      const speed = wanderState.speed + (wanderState.pursuitSpeed - wanderState.speed) * focus;
+      babyBody.velocity.x = dirX * speed;
+      babyBody.velocity.z = dirZ * speed;
+
+      // Face direction of motion
+      baby.rotation.y = Math.atan2(dirX, dirZ);
+    } else if (!gameOver && dragging) {
+      // Face direction of velocity while dragged
+      const vx = babyBody.velocity.x;
+      const vz = babyBody.velocity.z;
+      if (vx * vx + vz * vz > 0.05) {
+        baby.rotation.y = Math.atan2(vx, vz);
+      }
+    }
+
+    // --- Physics step ---
+    world.step(fixedStep, dt, 3);
+
+    // Sync baby mesh
+    baby.position.set(
+      babyBody.position.x,
+      babyBody.position.y - BABY_HALF.y, // align feet to ground
+      babyBody.position.z
+    );
+
+    // --- Animate flames ---
+    const t = performance.now() * 0.005;
+    for (let i = 0; i < flames.length; i++) {
+      const f = flames[i];
+      f.scale.y = 0.85 + 0.25 * Math.sin(t + i);
+      f.scale.x = 0.9 + 0.15 * Math.cos(t * 1.3 + i);
+    }
+    fireLight.intensity = 1.9 + 0.5 * Math.sin(t * 1.7);
+
+    // --- Pulse the warning ring ---
+    ring.material.opacity = 0.4 + 0.3 * Math.sin(t * 2);
+
+    // --- Collision check (bounding boxes) ---
+    if (!gameOver && checkCollision()) {
+      showLose();
+    }
+
+    renderer.render(scene, camera);
+    requestAnimationFrame(tick);
+  }
+
+  tick();
+})();
+</script>
+</body>
+</html>
